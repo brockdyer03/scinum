@@ -873,8 +873,42 @@ impl SciDecimal {
         self.pow(n)
     }
 
+    /// Newton-Raphson Square Root
     fn sqrt(self) -> Self {
-        todo!()
+        if self.is_sign_negative() {
+            panic!("Negative value in sqrt!")
+        }
+        let mut x_now = SciDecimal::new(1, 0);
+        let mut x_next: SciDecimal;
+        let mut iterations: u8 = 0;
+        let mut max_precision_reached = false;
+        while x_now.pow(2.into()) != self {
+            iterations += 1;
+            if iterations > 20 {
+                panic!("{}", iterations)
+            }
+            dbg!(self);
+            dbg!(x_now);
+            x_next = (x_now + (self / x_now)) / 2.into();
+            dbg!(x_next);
+            x_now = x_next
+        }
+        let significand = x_now.significand;
+        let exponent = self.exponent();
+        let exact = Self {
+            uncertainty: 0,
+            uncertainty_scale: 0,
+            nan: false,
+            inf: false,
+            negative: false,
+            exponent: exponent.into(),
+            significand,
+        };
+        if self.is_exact() {
+            exact
+        } else {
+            todo!()
+        }
     }
 
     pub fn exp(self) -> Self {
@@ -2521,6 +2555,15 @@ mod tests {
             Decimal::try_from(result.uncertainty()).unwrap().round_dp(5),
             dec!(0.08441167440582).round_dp(5)
         );
+    }
+
+    #[test]
+    fn square_root() {
+        let n_perfect = SciDecimal::new(25, 0);
+        let n_imperfect = SciDecimal::new(20, 0);
+
+        assert_eq!(n_perfect.sqrt(), 5.into());
+        assert_eq!(n_imperfect.sqrt(), sci!(4.472135955))
     }
 
     #[test]
