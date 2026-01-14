@@ -868,6 +868,51 @@ impl SciDecimal {
         }
     }
 
+    pub fn pow2(self) -> Self {
+        if !self.is_normal() {
+            todo!("Special values are not yet handled correctly by this method!")
+        }
+        if !self.is_exact() {
+            todo!()
+        }
+        let number: i128 = self.significand_signed().into();
+        let mut number: i128 = number.pow(2);
+        let mut exponent = 0;
+        let result: SciDecimal;
+        loop {
+            match number.try_into() {
+                Ok(val) => {
+                    result = SciDecimal::new(val, exponent);
+                    break
+                },
+                Err(_) => {
+                    exponent += 1;
+                    number /= 10
+                }
+            };
+        }
+        result
+    }
+    
+    pub fn exponentiation_by_squaring(self, n: i32) -> Self {
+        if !self.is_normal() {
+            todo!("Special values are not yet handled correctly by this method!")
+        }
+        if !(-127..128).contains(&n) {
+            panic!()
+        }
+        let number: SciDecimal = if n.is_negative() {
+            self.exponentiation_by_squaring(n.abs()).inv()
+        } else if n == 0 {
+            return SciDecimal::ONE;
+        } else if n % 2 == 0 {
+            self.pow2().exponentiation_by_squaring(n / 2)
+        } else {
+            self.pow2().exponentiation_by_squaring((n - 1) / 2)
+        };
+        number
+    }
+
     #[inline]
     pub fn powf(self, n: Self) -> Self {
         self.pow(n)
@@ -882,7 +927,7 @@ impl SciDecimal {
         let mut x_next: SciDecimal;
         let mut iterations: u8 = 0;
         let mut max_precision_reached = false;
-        while x_now.pow(2.into()) != self {
+        while x_now.powi(2) != self {
             iterations += 1;
             if iterations > 20 {
                 panic!("{}", iterations)
@@ -1205,7 +1250,15 @@ impl Add for SciDecimal {
             // In the simplest case, the exponents are the same
             Ordering::Equal => {
                 let number = self.significand_signed() + rhs.significand_signed();
-                Self::new(number, self.exponent())
+                Self {
+                    uncertainty: 0,
+                    uncertainty_scale: 0,
+                    nan: false,
+                    inf: false,
+                    negative: number.is_negative(),
+                    exponent: self.exponent,
+                    significand: number.unsigned_abs(),
+                }
             }
             // Otherwise have to try and set the exponent to the same for both terms
             // Use whichever exponent is smallest
@@ -1213,13 +1266,29 @@ impl Add for SciDecimal {
                 let exp_diff = rhs.exponent.0 - self.exponent.0;
                 let scaled = rhs.increase_precision(exp_diff.try_into().unwrap());
                 let number = self.significand_signed() + scaled.significand_signed();
-                Self::new(number, self.exponent())
+                Self {
+                    uncertainty: 0,
+                    uncertainty_scale: 0,
+                    nan: false,
+                    inf: false,
+                    negative: number.is_negative(),
+                    exponent: scaled.exponent,
+                    significand: number.unsigned_abs(),
+                }
             }
             Ordering::Greater => {
                 let exp_diff = self.exponent.0 - rhs.exponent.0;
                 let scaled = self.increase_precision(exp_diff.try_into().unwrap());
                 let number = scaled.significand_signed() + rhs.significand_signed();
-                Self::new(number, scaled.exponent())
+                Self {
+                    uncertainty: 0,
+                    uncertainty_scale: 0,
+                    nan: false,
+                    inf: false,
+                    negative: number.is_negative(),
+                    exponent: scaled.exponent,
+                    significand: number.unsigned_abs(),
+                }
             }
         };
         if self.is_exact() && rhs.is_exact() {
