@@ -778,55 +778,6 @@ impl Num for SciDecimal {
     }
 }
 
-impl SciDecimal {
-
-    fn pow2(self) -> Self {
-        if !self.is_normal() {
-            todo!("Special values are not yet handled correctly by this method!")
-        }
-        if !self.is_exact() {
-            todo!()
-        }
-        let number: i128 = self.significand_signed().into();
-        let mut number: i128 = number.pow(2);
-        let mut exponent = 0;
-        let result: SciDecimal;
-        loop {
-            match number.try_into() {
-                Ok(val) => {
-                    result = SciDecimal::new(val, exponent);
-                    break
-                },
-                Err(_) => {
-                    exponent += 1;
-                    number /= 10
-                }
-            };
-        }
-        result
-    }
-    
-    fn exponentiation_by_squaring(self, n: i32) -> Self {
-        if !self.is_normal() {
-            todo!("Special values are not yet handled correctly by this method!")
-        }
-        if !(-127..128).contains(&n) {
-            panic!()
-        }
-        let number: SciDecimal = if n.is_negative() {
-            self.exponentiation_by_squaring(n.abs()).inv()
-        } else if n == 0 {
-            return SciDecimal::ONE;
-        } else if n % 2 == 0 {
-            self.pow2().exponentiation_by_squaring(n / 2)
-        } else {
-            self.pow2().exponentiation_by_squaring((n - 1) / 2)
-        };
-        number
-    }
-}
-
-
 impl Float for SciDecimal {
     #[inline]
     fn nan() -> Self {
@@ -980,13 +931,23 @@ impl Float for SciDecimal {
         if !(-127..128).contains(&n) {
             panic!()
         }
-        let exact = if n.is_negative() {
-            self.powi(n.abs()).inv()
-        } else {
-            let number = self.significand_signed().pow(n.try_into().unwrap());
-            let exponent = self.exponent * i16::try_from(n).unwrap();
-            Self::new(number, exponent)
-        };
+        if n.is_negative() {
+            return self.powi(-n).inv()
+        } else if n == 0 {
+            return SciDecimal::ONE
+        }
+        let mut pow = n;
+        let mut exact = self;
+        let mut y = SciDecimal::ONE;
+        while pow > 1 {
+            if pow % 2 == 1 {
+                y = exact * y;
+                pow = pow - 1;
+            }
+            exact = exact * exact;
+            pow = pow / 2;
+        }
+        exact = exact * y;
         if self.is_exact() {
             exact
         } else {
@@ -1028,7 +989,7 @@ impl Float for SciDecimal {
             nan: false,
             inf: false,
             negative: false,
-            exponent: exponent.into(),
+            exponent: exponent,
             significand,
         };
         if self.is_exact() {
