@@ -453,6 +453,8 @@ impl SciDecimal {
         if !self.is_normal() {
             todo!("Special values are not yet handled correctly by this method!")
         }
+        dbg!(self);
+        dbg!(self.sf());
         if self.sf() < sf {
             panic!()
         };
@@ -2905,6 +2907,20 @@ mod tests {
         assert_eq!(n.powi(3), sci!(64));
         assert_eq!(n.powi(-1), sci!(0.25));
         assert_eq!(n.powi(-2), sci!(0.0625));
+
+        let n = SciDecimal::new(5, 7);
+        assert_eq!(n.powi(2), SciDecimal::new(25, 14));
+        assert_eq!(n.powi(5), SciDecimal::new(3125, 35));
+        assert_eq!(n.powi(-1), SciDecimal::new(2, -8));
+        assert_eq!(n.powi(-2), SciDecimal::new(4, -16));
+
+        let n = SciDecimal::new(922337203685478, 4);
+        assert_eq!(n.powi(2).trunc_sf(16), sci!(8.5070591730234693195e+37).trunc_sf(16));
+        assert_eq!(n.powi(3).trunc_sf(16), sci!(7.8463771692333616533e+56).trunc_sf(16));
+
+        //+ Currently Fails, something in the division algorithm possibly.
+        // assert_eq!(n.powi(-1).trunc_sf(16), sci!(1.0842021724855039412e-19).trunc_sf(16));
+        // assert_eq!(n.powi(-2).trunc_sf(16), sci!(1.1754943508222864395e-38).trunc_sf(16));
     }
 
     #[test]
