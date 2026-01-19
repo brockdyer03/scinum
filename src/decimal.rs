@@ -934,9 +934,9 @@ impl Float for SciDecimal {
             panic!()
         }
         if n.is_negative() {
-            return self.powi(-n).inv()
+            return self.powi(-n).inv();
         } else if n == 0 {
-            return SciDecimal::ONE
+            return SciDecimal::ONE;
         }
         let mut pow = n;
         let mut exact = self;
@@ -968,22 +968,21 @@ impl Float for SciDecimal {
         if self.is_sign_negative() {
             panic!("Negative value in sqrt!")
         }
-        let mut x_now = SciDecimal::new(1, 0);
-        let mut x_next: SciDecimal;
+        let mut result = SciDecimal::new(1, 0);
         let mut iterations: u8 = 0;
-        let mut max_precision_reached = false;
-        while x_now.powi(2) != self {
+        while result.powi(2) != self {
+
             iterations += 1;
             if iterations > 20 {
                 panic!("{}", iterations)
             }
-            dbg!(self);
-            dbg!(x_now);
-            x_next = (x_now + (self / x_now)) / 2.into();
-            dbg!(x_next);
-            x_now = x_next
+            println!("self / result: {}", self / result);
+            println!("result + self / result: {}", result + (self / result));
+            result = (result + (self / result)) / 2.into();
+            println!("result: {}", result.number());
+            println!("");
         }
-        let significand = x_now.significand;
+        let significand = result.significand;
         let exponent = self.exponent();
         let exact = Self {
             uncertainty: 0,
@@ -994,11 +993,7 @@ impl Float for SciDecimal {
             exponent: exponent,
             significand,
         };
-        if self.is_exact() {
-            exact
-        } else {
-            todo!()
-        }
+        if self.is_exact() { exact } else { todo!() }
     }
 
     fn cbrt(self) -> Self {
@@ -1295,7 +1290,12 @@ impl Add for SciDecimal {
             // In the simplest case, the exponents are the same
             Ordering::Equal => {
                 let number = self.significand_signed() + rhs.significand_signed();
-                Self::new(number, self.exponent)
+                Self {
+                    negative: number.is_negative(),
+                    significand: number.unsigned_abs(),
+                    exponent: self.exponent,
+                    ..SciDecimal::ZERO
+                }
             }
             // Otherwise have to try and set the exponent to the same for both terms
             // Use whichever exponent is smallest
@@ -1303,13 +1303,23 @@ impl Add for SciDecimal {
                 let exp_diff = rhs.exponent - self.exponent;
                 let scaled = rhs.increase_precision(exp_diff.try_into().unwrap());
                 let number = self.significand_signed() + scaled.significand_signed();
-                Self::new(number, self.exponent)
+                Self {
+                    negative: number.is_negative(),
+                    significand: number.unsigned_abs(),
+                    exponent: self.exponent,
+                    ..SciDecimal::ZERO
+                }
             }
             Ordering::Greater => {
                 let exp_diff = self.exponent - rhs.exponent;
                 let scaled = self.increase_precision(exp_diff.try_into().unwrap());
                 let number = scaled.significand_signed() + rhs.significand_signed();
-                Self::new(number, scaled.exponent)
+                Self {
+                    negative: number.is_negative(),
+                    significand: number.unsigned_abs(),
+                    exponent: scaled.exponent,
+                    ..SciDecimal::ZERO
+                }
             }
         };
         if self.is_exact() && rhs.is_exact() {
@@ -1500,21 +1510,54 @@ impl Div for SciDecimal {
                 }
             }
         }
-        let significand = if max_precision_reached {
+        let exact = if max_precision_reached {
             // TODO Go via u128 and then round (not truncate) to precision of u64
-            lhs.significand / rhs.significand
+            let mut lhs_significand: u128 = lhs.significand.into();
+            let mut exponent = 0;
+
+            let rhs_significand: u128 = rhs.significand.into();
+            while !lhs_significand.is_multiple_of(rhs_significand) {
+                match lhs_significand.checked_mul(10) {
+                    Some(new) => {
+                        lhs_significand = new;
+                        exponent += 1;
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+            // First perform the division now that lhs_significand is fully sized
+            lhs_significand /= rhs_significand;
+            let significand = loop {
+                match u64::try_from(lhs_significand) {
+                    Ok(val) => {
+                        break val;
+                    }
+                    Err(_) => {
+                        lhs_significand /= 10;
+                        exponent -= 1;
+                    }
+                }
+            };
+            Self {
+                significand,
+                exponent: lhs.exponent() - exponent,
+                negative,
+                ..SciDecimal::ZERO
+            }
         } else {
-            lhs.significand / rhs.significand
-        };
-        let exponent = lhs.exponent - rhs.exponent;
-        let exact = Self {
-            uncertainty: 0,
-            uncertainty_scale: 0,
-            nan: false,
-            inf: false,
-            negative,
-            exponent,
-            significand,
+            let significand = lhs.significand / rhs.significand;
+            let exponent = lhs.exponent - rhs.exponent;
+            Self {
+                uncertainty: 0,
+                uncertainty_scale: 0,
+                nan: false,
+                inf: false,
+                negative,
+                exponent,
+                significand,
+            }
         };
         if self.is_exact() && rhs.is_exact() {
             exact
@@ -1868,40 +1911,53 @@ impl From<SciFloat> for SciDecimal {
 // TODO: tests
 impl From<f64> for SciDecimal {
     /// Converts an `f64` to a `SciDecimal`.
-    /// 
+    ///
     /// The conversion currently goes via the string representation.
     fn from(n: f64) -> Self {
-        n.to_string().parse().expect("All possible f64 values are representable as a SciDecimal")
+        n.to_string()
+            .parse()
+            .expect("All possible f64 values are representable as a SciDecimal")
     }
 }
 
 // TODO: tests
 impl From<SciDecimal> for f64 {
     /// Converts a `SciDecimal` to an `f64`, dropping any uncertainty.
-    /// 
+    ///
     /// `n` is first rounded to 15 significant figures using `SciDecimal.round_sf()`,
     /// which in some cases may give the result a slightly lower precision than
     /// would theoretically be representable.
     /// The rounding uses the `RoundingMode::HalfEven` strategy.
-    /// 
+    ///
     /// If the absolute value of `n` is larger than `f64::MAX`, the appropriate
     /// infinity will be returned.
     /// If the absolute value of `n` is smaller than `f64::MIN_POSITIVE`, positive
     /// zero will be returned.
-    /// 
+    ///
     /// The conversion currently goes via the string representation.
     fn from(n: SciDecimal) -> f64 {
         if n.nan {
-            return f64::NAN
+            return f64::NAN;
         } else if n.inf || n.abs() > SciDecimal::from(f64::MAX) {
-            if n.negative { return f64::NEG_INFINITY } else { return f64::INFINITY }
+            if n.negative {
+                return f64::NEG_INFINITY;
+            } else {
+                return f64::INFINITY;
+            }
         } else if n.abs() < SciDecimal::from(f64::MIN_POSITIVE) {
-            return 0.0
+            return 0.0;
         }
         // Otherwise, must be able to fit, if we just drop excess precision
         // Don't waste time adding trailing zeros if we don't have to
-        let narrowed = if n.sf() > 15 { n.round_sf(15, RoundingMode::HalfEven) } else { n };
-        narrowed.to_string().parse().expect("All other possible values should fit into an f64")
+        let narrowed = if n.sf() > 15 {
+            n.round_sf(15, RoundingMode::HalfEven)
+        } else {
+            n
+        };
+        narrowed
+            .to_string()
+            .parse()
+            .expect("All other possible values should fit into an f64")
     }
 }
 
@@ -2738,11 +2794,20 @@ mod tests {
         // Recurring results
         assert_eq!(
             (SciDecimal::new(1, 0) / SciDecimal::new(3, 0)),
-            SciDecimal::new(3333333333333333333, -19),
+            SciDecimal {
+                significand: 3333333333333333333,
+                exponent: -19,
+                ..SciDecimal::ZERO
+            },
         );
+
         assert_eq!(
             (SciDecimal::new(1, 0) / SciDecimal::new(9, 0)),
-            SciDecimal::new(1111111111111111111, -19),
+            SciDecimal {
+                significand: 11111111111111111111,
+                exponent: -20,
+                ..SciDecimal::ZERO
+            },
         );
     }
 
@@ -2915,8 +2980,14 @@ mod tests {
         assert_eq!(n.powi(-2), SciDecimal::new(4, -16));
 
         let n = SciDecimal::new(922337203685478, 4);
-        assert_eq!(n.powi(2).trunc_sf(16), sci!(8.5070591730234693195e+37).trunc_sf(16));
-        assert_eq!(n.powi(3).trunc_sf(16), sci!(7.8463771692333616533e+56).trunc_sf(16));
+        assert_eq!(
+            n.powi(2).trunc_sf(16),
+            sci!(8.5070591730234693195e+37).trunc_sf(16)
+        );
+        assert_eq!(
+            n.powi(3).trunc_sf(16),
+            sci!(7.8463771692333616533e+56).trunc_sf(16)
+        );
 
         //+ Currently Fails, something in the division algorithm possibly.
         // assert_eq!(n.powi(-1).trunc_sf(16), sci!(1.0842021724855039412e-19).trunc_sf(16));
